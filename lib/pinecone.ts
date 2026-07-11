@@ -56,16 +56,20 @@ export async function ensureIndexExists(): Promise<void> {
   }
 }
 
+// metadata here -> we can then use a hard filter in addition to vector similarity.
 export interface MedicalChunk {
   id: string;
   content: string;
   metadata: {
     resourceType: string;
     patientId?: string;
-    patientName?: string;
-    recordDate?: string;
+    firstName?: string;
+    lastName?: string;
+    age?: number;
+    gender?: string;
+    race?: string;
+    location?: string;
     source: string;
-    chunkIndex: number;
     [key: string]: unknown;
   };
 }

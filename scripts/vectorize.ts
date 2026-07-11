@@ -21,36 +21,85 @@ import { PrismaClient } from '@prisma/client';
 import { upsertChunks, MedicalChunk } from '../lib/pinecone';
 
 const directUrl =
-  process.env.DIRECT_URL ?? process.env.DATABASE_URL?.replace('-pooler.', '.');
+	process.env.DIRECT_URL ??
+	process.env.DATABASE_URL?.replace('-pooler.', '.');
 const prisma = new PrismaClient(
-  directUrl ? { datasources: { db: { url: directUrl } } } : undefined
+	directUrl ? { datasources: { db: { url: directUrl } } } : undefined,
 );
 
 async function main() {
-  const args = process.argv.slice(2);
-  const limitIdx = args.indexOf('--limit');
-  const limit = limitIdx !== -1 ? parseInt(args[limitIdx + 1], 10) : undefined;
+	const args = process.argv.slice(2);
+	const limitIdx = args.indexOf('--limit');
+	const limit =
+		limitIdx !== -1 ? parseInt(args[limitIdx + 1], 10) : undefined;
 
-  // TODO: 1. Read the notes from Postgres (prisma.note.findMany).
-  //          Include the patient's name (include: { patient: {...} }) so you can
-  //          put it in the metadata. Respect `limit` (take: limit).
+	// TODO: 1. Read the notes from Postgres (prisma.note.findMany).
+	//          Include the patient's name (include: { patient: {...} }) so you can
+	//          put it in the metadata. Respect `limit` (take: limit).
 
-  // TODO: 2. Shape each note into a MedicalChunk:
-  //          { id: note.id,               // reuse the note id -> idempotent re-runs
-  //            content: note.content,
-  //            metadata: { patientId, patientName, type, date, source, chunkIndex } }
-  //          Metadata is what you'll filter searches on later — choose well.
-  const chunks: MedicalChunk[] = [];
+	const notes = await prisma.note.findMany({
+		include: {
+			patient: {
+				select: {
+					firstName: true,
+					lastName: true,
+					birthDate: true,
+					gender: true,
+					race: true,
+					state: true,
+					city: true,
+					// "current" meds = status 'active' (everything else is 'stopped')
+					medications: {
+						where: { status: 'active' },
+						select: { display: true },
+					},
+				},
+			},
+		},
+	});
+	// TODO: 2. Shape each note into a MedicalChunk:
+	//          { id: note.id,               // reuse the note id -> idempotent re-runs
+	//            content: note.content,
+	//            metadata: { patientId, patientName, type, date, source, chunkIndex } }
+	//          Metadata is what you'll filter searches on later — choose well.
+	const chunks: MedicalChunk[] = notes.map((note) => {
+		const age = note.patient.birthDate
+			? Math.floor(
+					(Date.now() - note.patient.birthDate.getTime()) /
+						31557600000,
+				)
+			: undefined;
 
-  // TODO: 3. Embed + upsert them: `const n = await upsertChunks(chunks)`.
+		return {
+			id: note.id, // reuse the note id -> re-runs overwrite, never duplicate
+			content: note.content, // what gets vectorized
+			metadata: {
+				resourceType: 'Note',
+				patientId: note.patientId,
+				firstName: note.patient.firstName ?? undefined,
+				lastName: note.patient.lastName ?? undefined,
+				age,
+				gender: note.patient.gender ?? undefined,
+				race: note.patient.race ?? undefined,
+				city: note.patient.city ?? undefined,
+				state: note.patient.state ?? undefined,
+				source: 'postgres',
+				currentMedications: note.patient.medications.map(
+					(m) => m.display,
+				),
+			},
+		};
+	});
 
-  console.log(`(stub) would vectorize ${chunks.length} notes (limit=${limit ?? 'all'})`);
-  throw new Error('Not implemented — build the vectorize pipeline (see TODOs).');
+	const upserted = await upsertChunks(chunks);
+	console.log(
+		`Done. Upserted ${upserted} note vectors (limit=${limit ?? 'all'}).`,
+	);
 }
 
 main()
-  .catch((err) => {
-    console.error(err);
-    process.exit(1);
-  })
-  .finally(() => prisma.$disconnect());
+	.catch((err) => {
+		console.error(err);
+		process.exit(1);
+	})
+	.finally(() => prisma.$disconnect());

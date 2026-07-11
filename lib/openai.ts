@@ -18,7 +18,7 @@ export async function createEmbedding(text: string): Promise<number[]> {
 	const response = await openai.embeddings.create({
 		model: 'text-embedding-3-small',
 		input: text,
-		dimensions: 1536,
+		dimensions: 1536, // HOW BIG IS THE ARRAY, basically. If you have something super complex, larger dimensions = more nuance and a potential better way to compare. 1536 is standard / default (use it)
 	});
 	return response.data[0].embedding;
 }

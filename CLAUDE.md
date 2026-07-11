@@ -1,53 +1,120 @@
-# Claude Code Instructions
+# CLAUDE.md
 
-Project-specific patterns and conventions for AI assistance.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this repo is
+
+A teaching codebase for a course on building a medical RAG system (see `docs/WHAT-WERE-BUILDING.md` and the README's 6-week curriculum). It ships as three branches with the same file layout but different completeness:
+
+- `main` — the graded/reference implementation.
+- `student` (**you are almost certainly on this one**) — core agent files are `TODO`-stubbed (`throw new Error('Not implemented — your turn!')`); students fill them in as challenges.
+- `instructor` — instructor-only material.
+
+**Before "fixing" a function that throws `Not implemented`, check whether it's an intentional student stub** (see the file list below) rather than a bug. Only implement it if the user is actively working that challenge; don't casually complete unrelated stubs as a drive-by.
+
+## Commands
+
+```bash
+npm run dev              # Next.js dev server (turbopack), http://localhost:3000
+npm run build             # production build
+npm run lint               # next lint
+
+npm run test              # vitest watch mode
+npm run test:run           # vitest, single run (CI-style)
+npx vitest run lib/pii.test.ts   # a single test file
+npm run test:evals         # LLM-as-judge evals (lib/evals) — hits real OpenAI API, needs .env, excluded from test:run
+
+npm run db:generate        # prisma generate (local codegen only — does NOT touch the DB)
+npm run db:studio          # browse the (read-only) database
+
+npm run vectorize          # rebuild the Pinecone index from Postgres notes
+npm run similarity         # ad-hoc vector-search script
+```
+
+`db:push` exists but the shared class database is **read-only** for students — don't run it (it will fail).
+
+Tests live next to the code they test (`*.test.ts`, e.g. `lib/pii.test.ts`, `app/api/schedule/route.test.ts`). `lib/evals/**` is excluded from the default vitest run (see `vitest.config.ts`) because it calls the real OpenAI API as an LLM judge; only runs under `test:evals`.
+
+## Architecture
+
+**Two data stores, one derived from the other:**
+- **Neon PostgreSQL** (via Prisma, `prisma/schema.prisma`) — the system of record: `Patient`, `Condition`, `Observation`, `Medication`, `Encounter`, and `Note` (clinical notes — full text lives here too). Prisma client: `lib/prisma.ts`.
+- **Pinecone** — a *derived* vector index over `Note` content only. Rebuildable from Postgres via `npm run vectorize` (`scripts/vectorize.ts`, `lib/pinecone.ts`). Never treat Pinecone as authoritative — if note content and the vector index disagree, Postgres wins and the index needs rebuilding.
+
+**The chat pipeline** is one file per agent under `lib/agents/`, orchestrated by `app/api/chat/route.ts`:
+
+```
+app/api/chat/route.ts
+  1. select(query, history)        lib/agents/selector.ts  — routes to SQL / vector / both / neither
+  2. runSql(query) ‖ runRag(query) lib/agents/sql.ts, lib/agents/rag.ts  — run in parallel, each returns text
+  3. aggregate({ sqlText, ragText }) lib/agents/aggregator.ts — the ONLY agent that streams; synthesizes one answer
+```
+
+- **Selector** just routes (needs SQL? needs vector search? neither = general question) — it does not extract entities/filters itself.
+- **SQL agent is text-to-SQL, not a query builder.** It feeds the Postgres schema + real distinct-value grounding to the LLM, gets back `{ sql, explanation }`, and runs a single validated read-only `SELECT` via `prisma.$queryRawUnsafe`. **There is no hand-coded query-builder module (no `sql-queries.ts` / `CONDITION_MAPPINGS`) — don't recreate one.** If a query returns wrong/empty results, fix the schema prompt or grounding inside `lib/agents/sql.ts`, never add a per-question function.
+  - Two guardrails matter here: **safety** (reject anything but one read-only `SELECT` — no DML/DDL/`;`; enforce a `LIMIT`) and **semantic grounding** (a column existing isn't the same as knowing what's in it — "smoker" ≠ the stored `"Smokes tobacco daily"`).
+- **RAG agent** calls `searchClinicalNotes()` (`lib/vector-search.ts`) and renders results to text — no streaming.
+- `lib/agent.ts` is now just the shared `Message` type; the old single-file `runAgent` orchestrator is gone.
+- `lib/patients.ts` (`findPatientByName`) is the one hand-written exact-match query, kept because the scheduling flow needs a real `Patient` object, not free text — this is deliberately *not* folded into the text-to-SQL agent.
+
+**Scheduling** (`lib/scheduling.ts`) is a human-in-the-loop flow: LLM detects scheduling intent → UI shows a confirmation form → only a human confirming books the appointment (`lib/calendar.ts`, Cal.com). `lib/retell.ts` / `scripts/retell/deploy-agent.ts` handle the outbound confirmation call (Retell voice agent).
+
+**MCP server** (`mcp-server/index.ts`) is a *separate, front-office channel* — same repo, different trust boundary from the chat UI.
+
+## PII obscuring — channel-based, not role-based
+
+There's no login/roles system. Instead, obscuring is decided by *which channel* is answering:
+- **MCP server** (front-office/staff tool) — **always** obscures. Every tool response must go through PII scrubbing before it leaves the server.
+- **Chat channel** (clinician-facing, `app/api/chat/route.ts`) — returns full data, no obscuring.
+
+Because the SQL agent's output shape depends on whatever columns the LLM chose, there's no fixed "name field" to redact — so obscuring runs the regex de-identifier (`obscureContent`, `lib/pii.ts`) over the **entire rendered output** of a channel, not field-by-field:
+
+```typescript
+const combined = [sqlText, ragText].filter(Boolean).join('\n\n');
+const safe = obscureContent(combined); // scrub the whole rendered output
+```
+
+It's intentionally imperfect (regex misses novel formats) — that gap is the point of `docs/CHALLENGE-PII.md`. `obscurePatient()` still exists as a field-by-field helper but the main MCP path uses `obscureContent` on rendered text instead. Enable/inspect via `OBSCURE_PII=true` in `.env`; utilities are `obscureName`, `obscureDate`, `obscureLocation`, `obscureContent`, `shouldObscurePII` in `lib/pii.ts`.
+
+## Prompt-injection defense (poisoned documents)
+
+`lib/security/content-validator.ts` detects/sanitizes injection patterns (fake system-override markers, role impersonation, tool-call mimicry, data-exfiltration URLs, hidden-instruction blocks) in *retrieved* content before it reaches the LLM — this defends the RAG path specifically, since anyone who can get content into `Note`/Pinecone can try to inject instructions via retrieval. See `docs/CHALLENGE-POISONED-DOCS.md` and `scripts/security/demo-poisoned-docs.ts` for the attack/defense demo.
 
 ## OpenAI Structured Outputs with Zod
 
-**Always use the Responses API pattern** for structured outputs:
+**Always use the Responses API pattern** for structured outputs — this is a hard project convention, not a suggestion:
 
 ```typescript
 import { z } from 'zod';
 import { zodTextFormat } from 'openai/helpers/zod';
 
-// 1. Define Zod schema
 const MySchema = z.object({
   field: z.string().describe('Description for the LLM'),
   count: z.number().describe('Numeric field'),
   category: z.enum(['a', 'b', 'c']).describe('Enum field'),
 });
-
-// 2. Infer TypeScript type from schema
 type MyType = z.infer<typeof MySchema>;
 
-// 3. Call responses.parse() with zodTextFormat
-const response = await openaiClient.responses.parse({
+const response = await openai.responses.parse({
   model: 'gpt-4o-mini',
   input: [
     { role: 'system', content: 'System prompt here' },
     { role: 'user', content: userInput },
   ],
   temperature: 0,
-  text: {
-    format: zodTextFormat(MySchema, 'schemaName'),
-  },
+  text: { format: zodTextFormat(MySchema, 'schemaName') },
 });
 
-// 4. Access parsed output and validate
-const parsed = response.output_parsed;
-return MySchema.parse(parsed);
+const parsed = MySchema.parse(response.output_parsed);
 ```
 
-**DO NOT use the old beta API:**
-- ~~`zodResponseFormat`~~ → use `zodTextFormat`
-- ~~`client.beta.chat.completions.parse()`~~ → use `client.responses.parse()`
-- ~~`messages: [...]`~~ → use `input: [...]`
-- ~~`response_format: zodResponseFormat(...)`~~ → use `text: { format: zodTextFormat(...) }`
-- ~~`response.choices[0].message.parsed`~~ → use `response.output_parsed`
+`lib/openai.ts` is the single place that configures the OpenAI client(s): `openai` (raw SDK client, used for `responses.parse`) and `openaiProvider` (Vercel AI SDK provider, used for `streamText` in the aggregator only). Both honor `OPENAI_BASE_URL` if set — don't instantiate a second client elsewhere.
+
+**DO NOT use the old beta API:** `zodResponseFormat` → `zodTextFormat`; `client.beta.chat.completions.parse()` → `client.responses.parse()`; `messages: [...]` → `input: [...]`; `response.choices[0].message.parsed` → `response.output_parsed`.
 
 ## API Route Input Validation
 
-**Parse request bodies with a Zod schema and let it throw** — the route's catch-all maps `ZodError` to a 400:
+Parse request bodies with a Zod schema and let it throw — the route's catch-all maps `ZodError` to a 400:
 
 ```typescript
 const MyRequestSchema = z.object({
@@ -57,7 +124,7 @@ const MyRequestSchema = z.object({
 
 export async function POST(request: Request) {
   try {
-    const { query, topK } = MyRequestSchema.parse(await request.json()); // typed, defaults applied
+    const { query, topK } = MyRequestSchema.parse(await request.json());
     // ... happy path only
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -71,78 +138,12 @@ export async function POST(request: Request) {
 }
 ```
 
-**DO NOT:**
-- ~~`if (!query || typeof query !== "string") { ... }`~~ — that's what the schema is for
-- ~~`safeParse` + hand-built issue strings~~ — just `.parse()` and let it fail
-- ~~`new Response(JSON.stringify({ error }), { status, headers })`~~ — use `NextResponse.json(body, { status })`
+Don't hand-roll `if (!query || typeof query !== "string")` checks, don't use `safeParse` + hand-built issue strings, and don't build responses with raw `new Response(JSON.stringify(...))` — use `NextResponse.json(body, { status })`.
 
 ## TypeScript Conventions
 
-**Prefer `type` aliases over `interface`** for object shapes, props, and data models:
+Prefer `type` aliases over `interface` for object shapes, props, and data models — `type` handles unions/intersections/primitives consistently and avoids declaration-merging surprises. Reach for `interface` only when you specifically need merging.
 
-```typescript
-// Do this
-type Patient = { id: string; firstName: string | null };
+## Data source
 
-// Not this
-interface Patient { id: string; firstName: string | null }
-```
-
-`type` is more consistent (handles unions, intersections, and primitives that `interface` can't) and avoids declaration-merging surprises. Reach for `interface` only when you specifically need merging (rare here).
-
-## Project Architecture
-
-- **Neon PostgreSQL**: structured medical data (patients, conditions, observations, medications, notes, encounters) — the system of record.
-- **Pinecone**: vector search over the clinical notes — a *derived* index, rebuildable from Postgres via `npm run vectorize`.
-- **Prisma ORM**: type-safe database access.
-- **The chat agent** (`lib/agent.ts` → `runAgent`): **router** (`analyzeQuery` — which engines does this question need?) → **SQL agent ‖ vector agent** run in parallel → **aggregator** LLM synthesizes both and streams the answer.
-
-### The SQL side is text-to-SQL — do NOT hand-code query builders
-
-The LLM writes the SQL. `lib/text-to-sql.ts` (`textToSqlQuery`) feeds the schema + real distinct-value grounding to the model, gets back `{ sql, explanation }`, validates it, and runs it read-only. **There is no `sql-queries.ts` / query-builder / `CONDITION_MAPPINGS` layer anymore — it was deleted. Do not recreate it.** When a query returns wrong/empty results, fix the schema prompt or the grounding in `lib/text-to-sql.ts` — never add a per-question function.
-
-Two guardrails are the point:
-- **Safety** — an LLM writing SQL is an injection surface. `assertReadOnly` accepts only a single `SELECT` (no DML/DDL/`;`). In production also point `DATABASE_URL` at a read-only role (`student_ro`).
-- **Semantic grounding** — the schema tells the model a column *exists*, not what's *in* it ("smoker" ≠ the stored `"Smokes tobacco daily"`; "heart attack" ≠ `"Myocardial Infarction"`). Ground the prompt with real distinct values.
-
-`findPatientByName` (scheduling's one exact lookup) lives in `lib/patients.ts`, not a query-builder module.
-
-## Data Source
-
-Synthea Coherent Dataset — statistically realistic, **fully synthetic (zero PHI)**. The deployed/shared database is a **~200-patient subset** (fits the Neon free tier), ~21k SOAP-style clinical notes. Students connect **read-only**; nobody creates or seeds it.
-- See `docs/DATA_STRUCTURE.md` for FHIR resource details.
-
-## PII Obscuring
-
-PII obscuring is **channel-based** (no login/roles): the **MCP server** (front-office channel) always obscures; the chat channel (clinician-facing) returns full data.
-
-**The obscuring is shape-agnostic.** Because the SQL agent returns whatever columns the LLM chose, there's no fixed "name field" to pseudonymize — so the obscured channel runs the regex de-identifier (`obscureContent`) over the **entire rendered output** (names, SSNs, phones, dates, addresses). It's imperfect by design (regex misses novel formats) — that's the Week 5 lesson. (`obscurePatient` still exists as a field-by-field helper but the main path doesn't use it.)
-
-### Enable Globally
-```bash
-# In .env
-OBSCURE_PII=true
-```
-
-### Applying it
-```typescript
-const combined = [sqlText, ragText].filter(Boolean).join('\n\n');
-const safe = obscureContent(combined); // scrub the whole rendered output
-```
-
-### What Gets Obscured
-
-| Data Type | Original | Obscured |
-|-----------|----------|----------|
-| Names | `John Smith` | `Patient-A7B3` |
-| Birth dates | `1985-03-15` | `1985-XX-XX` |
-| Locations | `Boston, MA 02101` | `[LOCATION REDACTED]` |
-| Clinical notes | Names, SSNs, phones, emails, addresses | `[NAME]`, `[SSN REDACTED]`, etc. |
-
-### Utilities (`lib/pii.ts`)
-- `shouldObscurePII(flag?)` - Check if obscuring is enabled
-- `obscureName(name)` - Hash-based pseudonymization
-- `obscureDate(date)` - Keep year, hide month/day
-- `obscureLocation(city, state, zip)` - Full redaction
-- `obscureContent(text)` - Regex patterns for PII in clinical text
-- `obscurePatient(patient, obscure?)` - Apply all obscuring to a patient object
+Synthea Coherent Dataset — statistically realistic, fully synthetic (zero PHI). The shared class database is a ~200-patient subset, ~21k SOAP-style clinical notes, and is **read-only** for students (nobody creates or seeds it directly — `DATABASE_URL` points at a read-only role in production).
