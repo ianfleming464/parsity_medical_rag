@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm config *)",
+      "Bash(ls -ld \"$\\(npm config get prefix\\)/lib/node_modules\")",
+      "Bash(npm -v)",
+      "Bash(claude install *)"
+    ]
+  }
+}
