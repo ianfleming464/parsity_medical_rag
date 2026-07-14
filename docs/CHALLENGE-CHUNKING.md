@@ -17,9 +17,14 @@ Look at what `bible:fixed` produces. It slices every 500 characters, mid-verse, 
 
 Read up on chunking. You're looking for answers to three questions:
 
-1. What chunking strategies exist? (fixed-size, sentence, paragraph, structural/document-aware, semantic)
-2. **What is chunk overlap** (sometimes "sentence overlap"), and what problem does it solve?
-3. How does the way people will *query* an index change how you should chunk it?
+1. What chunking strategies exist? (fixed-size, sentence, paragraph, structural/document-aware, semantic) -> DONE
+
+2. **What is chunk overlap** (sometimes "sentence overlap"), and what problem does it solve? -> 
+
+## Ian's answer - when using content-independent chunking methods, using sentence overlap can ensure semantic meaning is not lost if, for example, some important information is split between chunks. It provides a buffer but creates redundancy. 
+3. How does the way people will *query* an index change how you should chunk it? -> 
+
+## Ian's answer - chunk granularity matched to query granularity : short specific expected quries benefits form smaller focused chunks - less unrelated info in the semantic search. Larger more complex queires require more outer context to answer, hence larger chunks. If the queries are narrow but chunks are large, the answer might be buried in unrelated info. 
 
 Good starting points:
 
@@ -41,8 +46,13 @@ Decide how *you* will chunk the KJV. Some of your options (all legitimate — th
 
 **Before you build, write down two things** (they go in your video):
 
-1. **Who uses this index and what do their queries look like?** "Find that verse about love being patient" wants different chunks than "what does the book say about money?" Your strategy should serve *your* imagined user.
+1. **Who uses this index and what do their queries look like?** "Find that verse about love being patient" wants different chunks than "what does the book say about money?" Your strategy should serve *your* imagined user. ->
+## Ian's answer - I imagine a user exploring biblical passages through spiritual or philosophical questions rather than always searching by an exact book, chapter, or verse. Some queries may contain a known phrase, while others may describe a broader idea in modern language, such as love of others, forgiveness, inner spiritual transformation, or the relationship between humanity and God.
+
+## This favours chunks containing several consecutive verses. A single verse may be too narrow to express the complete idea, while an entire chapter may contain several unrelated themes. Packed passages provide enough local context for conceptual queries while remaining focused enough for more specific phrase-level searches.
+
 2. **Your rule at the boundaries.** Do chunks cross chapters? Books? Why or why not?
+## Ian's answer - No, because chapter's are explicit and reliable in the parsed data and usually constitue an end to a point or info. 
 
 ## Part 3 — Build it
 
