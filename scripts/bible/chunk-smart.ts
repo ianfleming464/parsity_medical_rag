@@ -13,6 +13,7 @@
  */
 
 import { loadVerses, Verse } from './parse';
+import * as fs from 'fs';
 
 type Chunk = {
   id: string;
@@ -204,27 +205,27 @@ function main() {
     currentVerses = [];
   }
 
-    for (const verse of verses) {
-      const firstBufferedVerse = currentVerses[0];
+  for (const verse of verses) {
+    const firstBufferedVerse = currentVerses[0];
 
-      const startsNewBookOrChapter =
-        firstBufferedVerse !== undefined &&
-        (verse.book !== firstBufferedVerse.book || verse.chapter !== firstBufferedVerse.chapter);
+    const startsNewBookOrChapter =
+      firstBufferedVerse !== undefined &&
+      (verse.book !== firstBufferedVerse.book || verse.chapter !== firstBufferedVerse.chapter);
 
-      const verseText = `${verse.verse} ${verse.text}`;
-      const currentText = currentVerses
-        .map(bufferedVerse => `${bufferedVerse.verse} ${bufferedVerse.text}`)
-        .join('\n');
+    const verseText = `${verse.verse} ${verse.text}`;
+    const currentText = currentVerses
+      .map(bufferedVerse => `${bufferedVerse.verse} ${bufferedVerse.text}`)
+      .join('\n');
 
-      const wouldExceedLimit =
-        currentVerses.length > 0 && currentText.length + 1 + verseText.length > MAX_CHARS;
+    const wouldExceedLimit =
+      currentVerses.length > 0 && currentText.length + 1 + verseText.length > MAX_CHARS;
 
-      if (startsNewBookOrChapter || wouldExceedLimit) {
-        flushCurrentChunk();
-      }
-      currentVerses.push(verse);
+    if (startsNewBookOrChapter || wouldExceedLimit) {
+      flushCurrentChunk();
+    }
+    currentVerses.push(verse);
   }
-    flushCurrentChunk();
+  flushCurrentChunk();
 
   // TODO — build structure-aware chunks:
   //  1. Walk verses in order, accumulating them into a buffer.
@@ -235,7 +236,14 @@ function main() {
   //  6. Write data/bible/chunks-smart.jsonl (JSON.stringify(chunk) per line).
   // Then: `npm run bible:audit -- data/bible/chunks-smart.jsonl` and compare it
   // to the fixed-size output. Why is the smart one better for retrieval?
-  throw new Error('Not implemented — your turn! (scripts/bible/chunk-smart.ts)');
+
+  const outputPath = 'data/bible/chunks-smart.jsonl';
+
+  fs.writeFileSync(outputPath, chunks.map(chunk => JSON.stringify(chunk)).join('\n'));
+
+  console.log(`Loaded ${verses.length} verses.`);
+  console.log(`Produced ${chunks.length} chunks.`);
+  console.log(`Wrote ${outputPath}`);
 }
 
 main();

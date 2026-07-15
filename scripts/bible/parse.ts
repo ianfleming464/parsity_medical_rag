@@ -19,7 +19,9 @@ export type Verse = {
 
 const START_MARKER = '*** START OF THE PROJECT GUTENBERG EBOOK';
 const END_MARKER = '*** END OF THE PROJECT GUTENBERG EBOOK';
-const VERSE_RE = /^(\d+):(\d+)\s+/;
+// Gutenberg occasionally runs verse markers together with the following text
+// (for example, "26:2I think..."). Whitespace after a marker is optional.
+const VERSE_RE = /^(\d+):(\d+)\s*/;
 
 /** Strip the Gutenberg header/footer, returning only the scripture body */
 export function extractBody(raw: string): string {
@@ -42,9 +44,14 @@ export function parseVerses(body: string): Verse[] {
   let pendingTitle: string | null = null;
 
   for (const para of paragraphs) {
-    const match = para.match(VERSE_RE);
+    // A continuation paragraph can introduce later verses, e.g.
+    // "Therefore ...; 31:49 And Mizpah...". Split before each inline marker
+    // so the leading continuation remains with the previous verse and every
+    // following marker becomes its own record.
+    const pieces = para.split(/\s(?=\d+:\d+\s*)/);
+    const firstVersePieceIndex = pieces.findIndex((piece) => VERSE_RE.test(piece));
 
-    if (!match) {
+    if (firstVersePieceIndex === -1) {
       // Either a book title or a continuation of the previous verse.
       // Titles are short; continuations belong to the verse before them.
       if (pendingTitle === null && verses.length > 0 && para.length > 0 && !looksLikeTitle(para)) {
@@ -55,6 +62,15 @@ export function parseVerses(body: string): Verse[] {
       continue;
     }
 
+    const leadingContinuation = pieces
+      .slice(0, firstVersePieceIndex)
+      .join(' ')
+      .trim();
+    if (leadingContinuation && verses.length > 0) {
+      verses[verses.length - 1].text += ' ' + leadingContinuation;
+    }
+
+    const match = pieces[firstVersePieceIndex].match(VERSE_RE)!;
     const chapter = parseInt(match[1], 10);
     const verse = parseInt(match[2], 10);
 
@@ -69,9 +85,7 @@ export function parseVerses(body: string): Verse[] {
       pendingTitle = null;
     }
 
-    // A paragraph can contain SEVERAL verses run together — split on
-    // inline "chapter:verse " references, not just the one at the start
-    for (const piece of para.split(/\s(?=\d+:\d+\s)/)) {
+    for (const piece of pieces.slice(firstVersePieceIndex)) {
       const m = piece.match(VERSE_RE);
       if (!m) {
         // stray fragment — attach to the previous verse
