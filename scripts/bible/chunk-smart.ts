@@ -227,16 +227,6 @@ function main() {
   }
   flushCurrentChunk();
 
-  // TODO — build structure-aware chunks:
-  //  1. Walk verses in order, accumulating them into a buffer.
-  //  2. Flush the buffer into a Chunk once it reaches the --target size...
-  //  3. ...but NEVER split a verse, and NEVER let a chunk span two books.
-  //  4. Optionally carry the last --overlap-verses verses into the next chunk.
-  //  5. Tag each chunk with its book / chapter / verse-range `reference`.
-  //  6. Write data/bible/chunks-smart.jsonl (JSON.stringify(chunk) per line).
-  // Then: `npm run bible:audit -- data/bible/chunks-smart.jsonl` and compare it
-  // to the fixed-size output. Why is the smart one better for retrieval?
-
   const outputPath = 'data/bible/chunks-smart.jsonl';
 
   fs.writeFileSync(outputPath, chunks.map(chunk => JSON.stringify(chunk)).join('\n'));
