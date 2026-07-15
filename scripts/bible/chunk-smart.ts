@@ -165,7 +165,7 @@ function main() {
   const chunks: Chunk[] = [];
   let currentVerses: Verse[] = [];
 
-  console.log(`Loaded ${verses.length} verses; produced ${chunks.length} chunks so far.`);
+  console.log(`Loaded ${verses.length} verses.`);
 
   function flushCurrentChunk(): void {
     if (currentVerses.length === 0) return;
