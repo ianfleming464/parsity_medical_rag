@@ -140,7 +140,7 @@ function slugifyBook(book: string): string {
 }
 
 /**
- * Chunking flow, in plain English:
+ * Chunking flow:
  *
  * 1. Load every parsed verse once. `verses` is the complete source corpus and
  *    is never changed.
@@ -156,9 +156,6 @@ function slugifyBook(book: string): string {
  *    has a verse, so an unusually long individual verse remains intact.
  * 6. Flush once more after the loop because the final passage has no following
  *    verse to trigger its boundary.
- *
- * The next checkpoint writes the completed `chunks` array as JSONL, then audits
- * the generated file before any embedding or Pinecone work begins.
  */
 function main() {
   const verses: Verse[] = loadVerses();
