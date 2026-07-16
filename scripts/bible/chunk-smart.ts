@@ -117,7 +117,7 @@ function canonicalBookName(sourceBook: string): string {
 }
 
 /**
- * Creates the human-readable citation stored in each chunk's metadata.
+ * Creates the human-readable citation stored in each chunk's METADATA.
  * Uses a single verse number when the chunk contains one verse, otherwise
  * includes the inclusive first-to-last verse range.
  */

@@ -58,3 +58,6 @@ main().catch(error => {
   console.error(error);
   process.exit(1);
 });
+
+
+// PINECONE_INDEX=bible-kjv npm run bible:query -- --full "Should I get even with someone who has hurt me?"
