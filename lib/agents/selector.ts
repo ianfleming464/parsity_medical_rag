@@ -17,34 +17,48 @@ import { Prisma } from '@prisma/client';
 // useRag: boolean;
 // reason: string;
 // agentQuery: string;
+
 const planAgentSchema = z.object({
-	useSql: z.boolean().describe('Whether to use the sql database'),
-	useRag: z.boolean().describe('Whether to use the vector store'),
+	useSql: z
+		.boolean()
+		.describe(
+			'Whether to use the sql database which has structured data about patients',
+		),
+	useRag: z
+		.boolean()
+		.describe(
+			'Whether to use the vector store which has infomration about patient notes BUT not structured data',
+		),
+	useScheduler: z
+		.boolean()
+		.describe('Decide whether to schedule an appointment for the patient'),
 	reason: z
 		.string()
 		.describe(
-			'The reason for the decision to use the sql database or the vector store or NONE',
+			'The reason for the decision to use the sql database or the vector store or NONE or to schedule an appointment',
 		),
 	agentQuery: z
 		.string()
-		.describe('The optimized query to be sent to RAG agent')
+		.describe(
+			'The optimized query to be sent to RAG agent - fix spelling and grammar errors',
+		)
 		.nullable(), // if useRag is true, this is the query to be sent to the RAG agent
 	clarificationQuery: z
 		.string()
 		.describe(
-			'If the query is unclear, ask for clarification. If it is unrelated to medical information or patient records, politely redirect the user to ask a medical question instead.',
+			'If the query is not clear, ask for clarification. You can only answer questions about medical information.',
 		)
-		.nullable(), // if useSql is true, this is the query to be sent to the clarification agent
+		.nullable(),
 });
 
 export type Plan = {
 	useSql: boolean;
 	useRag: boolean;
+	useScheduler: boolean;
 	/** false = a general question with no tie to the records — answer directly. */
 	needsSearch: boolean;
 	semanticQuery: string;
 };
-
 // TODO: Write the system prompt. Describe the two stores (SQL DB of structured
 // facts; vector store of clinical notes) and when each is needed. A pure general
 // question (a greeting, "what's a normal A1C range?") needs NEITHER. When unsure,
@@ -69,41 +83,32 @@ export async function select(
 		text: { format: zodTextFormat(planAgentSchema, 'plan') },
 		input: [
 			{
-				role: 'system',
+				role: 'user',
 				content: `
-        From the user's query, decide if the query should be answered by the vector store or the sql database or both or none.
-        If the query is unrelated to medical information or patient records, set useSql and useRag to false and use clarificationQuery to politely redirect the user to ask a medical question. A general medical question can use neither store and should not be redirected.
-        Our vector store has notes about patients. Here is an example
+				Convo history:${
+					history.length > 0
+						? history
+								.slice(-5)
+								.map((h) => `${h.role}: ${h.content}`)
+								.join('\n')
+						: ''
+				}
 
-          city: "Boston"
-          content: "1988-06-07\n\n# Chief Complaint\n- Blurred Vision\n- Tingling in Hands and Feet\n- Thirst\n- urinary frequency\n- Fatigue\n- Frequent Urination\n\n\n# History of Present Illness\nAvery919\n is a 76 year-old non-hispanic black male. Patient has a history of laceration of foot.\n\n# Social History\nPatient is married. Patient is an active smoker and is an alcoholic.\n Patient identifies as heterosexual.\n\nPatient comes from a middle socioeconomic background.\n Patient has a high school education.\nPatient currently has Medicare.\n\n# Allergies\nNo Known Allergies.\n\n# Medications\nacetaminophen 325 mg oral tablet; hydrochlorothiazide 25 mg oral tablet; insulin human, isophane 70 unt/ml / regular insulin, human 30 unt/ml injectable suspension [humulin]; nitroglycerin 0.4 mg/actuat mucosal spray\n\n# Assessment and Plan\n\n\n## Plan\n\nThe following reports were created:\n- basic metabolic panel \n- lipid panel \nThe patient was prescribed the following medications:\n- insulin human, isophane 70 unt/ml / regular insulin, human 30 unt/ml injectable suspension [humulin]\n- hydrochlorothiazide 25 mg oral tablet\n- nitroglycerin 0.4 mg/actuat mucosal spray"
-          currentMedications: [ "Unknown", "1 ML DOCEtaxel 20 MG/ML Injection", "0.25 ML Leuprolide Acetate 30 MG/ML Prefilled Syringe", "insulin human, isophane 70 UNT/ML / Regular Insulin, Human 30 UNT/ML Injectable Suspension [Humulin]", "Hydrochlorothiazide 25 MG Oral Tablet", "Simvastatin 20 MG Oral Tablet", "Amlodipine 5 MG Oral Tablet" ]
-          firstName: "Avery"
-          gender: "male"
-          lastName: "Mueller"
-          patientId: "87741719-d8a6-f2ac-104b-7885598a0a71"
-          race: "Black or African American"
-          source: "postgres"
-          state: "MA"
-
-          Our sql database has structured data about patients
-        `,
-			}, // information about what to do
-			{ role: 'user', content: query }, // the query from the user
+				\n\n User Query: ${query}`,
+			}, // the query from the user
 		],
+		temperature: 0.5,
 	});
 
 	console.log(answer.output_parsed);
 
-	// decide from the string
-
-	// TODO:
-	// 1. Ask the LLM for { requiresSQL, requiresVector, semanticQuery } with
-	//    openai.responses.parse({ model, input: [system(SYSTEM_PROMPT), ...recent
-	//    history, user(query)], temperature: 0,
-	//    text: { format: zodTextFormat(PlanSchema, 'plan') } }), then
-	//    PlanSchema.parse(response.output_parsed).
-	// 2. useSql = requiresSQL; useRag = requiresVector;
-	//    needsSearch = useSql || useRag  (both false → a general question).
-	// 3. Return { useSql, useRag, needsSearch, semanticQuery: semanticQuery || query }.
+	// Map the parsed answer onto the Plan the route expects.
+	const p = planAgentSchema.parse(answer.output_parsed);
+	return {
+		useSql: p.useSql,
+		useRag: p.useRag,
+		useScheduler: p.useScheduler,
+		needsSearch: p.useSql || p.useRag,
+		semanticQuery: p.agentQuery ?? query,
+	};
 }

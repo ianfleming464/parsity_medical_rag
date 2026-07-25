@@ -43,24 +43,36 @@ export type AggregateInput = {
 };
 
 export function aggregate(
-	input: AggregateInput,
+	query: string,
+	history: Message[],
+	results: string,
 ): ReturnType<typeof streamText> {
-	const context = [input.sqlText, input.ragText].filter(Boolean).join('\n\n');
-	const system =
-		input.system ?? (context ? AGGREGATOR_PROMPT : GENERAL_PROMPT);
-
-	const userContent = context
-		? `Retrieved data:\n${context}\n\nUser question: ${input.query}`
-		: input.query;
-
-	const messages = [
-		...input.history.map((m) => ({ role: m.role, content: m.content })),
-		{ role: 'user' as const, content: userContent },
-	];
-
+	// text is the results ofr the previous agents
 	return streamText({
-		model: openaiProvider('gpt-4o-mini'),
-		system,
-		messages,
+		model: openaiProvider('gpt-4'),
+		system: `
+		Use the information provided to answer the user's question.
+		NEVER INVENT OR INFER MEDICAL INFORMATION. ONLY ANSWER FROM THE PROVIDED INFORMATION.
+
+		If you do not have the information to answer the question, say so plainly and do not make up information.
+		`,
+		messages: [
+			{
+				role: 'user',
+				content: `
+		<user-question>
+			User question: ${query}
+		</user-question>	
+
+		<conversation-history>${history.map((h) => `${h.role}: ${h.content}`).join('\n')}
+		</conversation-history>
+
+		<retrieved-data>	
+		${results}
+		</retrieved-data>
+			`,
+			},
+		],
+		temperature: 0.7,
 	});
 }
