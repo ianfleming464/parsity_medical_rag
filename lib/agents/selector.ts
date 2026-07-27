@@ -92,7 +92,7 @@ export async function select(
 								.map((h) => `${h.role}: ${h.content}`)
 								.join('\n')
 						: ''
-				}
+				} 
 
 				\n\n User Query: ${query}`,
 			}, // the query from the user

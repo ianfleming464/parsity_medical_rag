@@ -5,17 +5,20 @@ import { select } from '@/lib/agents/selector';
 import { runSql } from '@/lib/agents/sql';
 import { runRag } from '@/lib/agents/rag';
 import { aggregate } from '@/lib/agents/aggregator';
+import { buildSchedulingAction, detectSchedulingIntent } from '@/lib/scheduling';
+import { streamText } from 'ai';
+import { openaiProvider } from '@/lib/openai';
 
 const ChatRequestSchema = z.object({
-	query: z.string().min(1),
-	messages: z
-		.array(
-			z.object({
-				role: z.enum(['user', 'assistant']),
-				content: z.string(),
-			}),
-		)
-		.default([]),
+  query: z.string().min(1),
+  messages: z
+    .array(
+      z.object({
+        role: z.enum(['user', 'assistant']),
+        content: z.string(),
+      }),
+    )
+    .default([]),
 });
 
 /**
@@ -47,11 +50,45 @@ export async function POST(request: Request) {
 			ragResult = await runRag(plan.semanticQuery);
 		}
 
-		console.log('plan', plan);
-		console.log('sqlResult', sqlResult);
-		console.log('ragResult', ragResult);
+		// if scheduleing then short circuit
+		if (plan.useScheduler) {
+			const schedulingResult = await detectSchedulingIntent(
+				query,
+				messages,
+			);
 
-		return NextResponse.json({ plan, sqlResult });
+			return streamText({
+				model: openaiProvider('gpt-4o-mini'),
+				messages: [
+					{
+						role: 'user',
+						content: `
+            You are providing a calendar compoent with the patient to schedule for a visit
+            The patient name is ${schedulingResult?.patientName}
+            The suggested date is ${schedulingResult?.suggestedDate}
+            The suggested time is ${schedulingResult?.suggestedTime}
+            The reason is ${schedulingResult?.reason}
+
+            The front end that is consuming this will compose the caledar with that info.
+            `,
+					},
+				],
+				temperature: 0.7,
+			}).toTextStreamResponse({
+				headers: {
+					'X-Scheduling-Action': encodeURIComponent(
+						JSON.stringify(buildSchedulingAction(schedulingResult)),
+					),
+				},
+			});
+		}
+
+		// summarize and stream that result to the frontend
+		return aggregate(
+			query,
+			messages,
+			`${sqlResult}\n\n${ragResult}`,
+		).toTextStreamResponse();
 	} catch (error) {
 		if (error instanceof z.ZodError) {
 			return NextResponse.json({ error: error.message }, { status: 400 });
