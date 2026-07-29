@@ -75,10 +75,8 @@ export async function searchClinicalNotes(
 			First name: ${doc.metadata.firstName}
 			Last name: ${doc.metadata.lastName}
 			`,
-			{
-				topN: 10,
-			},
 		),
+		{ topN: 10 },
 	);
 
 	return { docs: docs.matches, rerankedDocuments: rerankedDocuments.data };

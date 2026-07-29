@@ -27,7 +27,11 @@ beforeEach(() => {
 });
 
 function scheduleRequest(
-  body: object = { patientName: 'Abe Frami', dateTime: '2026-07-10T14:00:00Z', notes: 'Follow-up' }
+  body: object = {
+    patientName: 'Abe Frami',
+    dateTime: '2026-07-10T14:00:00.000Z',
+    timeZone: 'Europe/Berlin',
+  }
 ): Request {
   return new Request('http://localhost/api/schedule', {
     method: 'POST',
@@ -43,13 +47,23 @@ describe('POST /api/schedule', () => {
     const body = await res.json();
     expect(body.success).toBe(true);
     expect(body.bookingId).toBe('bk_123');
-    expect(scheduleAppointment).toHaveBeenCalledOnce();
+    expect(scheduleAppointment).toHaveBeenCalledWith({
+      patientName: 'Abe Frami',
+      dateTime: '2026-07-10T14:00:00.000Z',
+      timeZone: 'Europe/Berlin',
+    });
   });
 
   it('returns 503 when Cal.com is not configured', async () => {
     vi.mocked(isCalConfigured).mockReturnValue(false);
     const res = await POST(scheduleRequest());
     expect(res.status).toBe(503);
+    expect(scheduleAppointment).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid schedule request before booking', async () => {
+    const res = await POST(scheduleRequest({ patientName: '', dateTime: 'Tuesday' }));
+    expect(res.status).toBe(400);
     expect(scheduleAppointment).not.toHaveBeenCalled();
   });
 });

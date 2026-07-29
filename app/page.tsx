@@ -145,7 +145,13 @@ export default function Home() {
     setScheduling(prev => (prev ? { ...prev, isSubmitting: true } : null));
 
     try {
-      const dateTime = `${scheduling.date}T${scheduling.time}:00`;
+      const selectedDateTime = new Date(`${scheduling.date}T${scheduling.time}:00`);
+      if (Number.isNaN(selectedDateTime.getTime())) {
+        throw new Error('Choose a valid appointment date and time.');
+      }
+
+      const dateTime = selectedDateTime.toISOString();
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
       const response = await fetch('/api/schedule', {
         method: 'POST',
@@ -153,7 +159,7 @@ export default function Home() {
         body: JSON.stringify({
           patientName: scheduling.action.patientName,
           dateTime,
-          notes: scheduling.action.reason,
+          timeZone,
         }),
       });
 

@@ -22,8 +22,8 @@ export function aggregate(
 		system: `
 		Use the information provided to answer the user's question.
 		NEVER INVENT OR INFER MEDICAL INFORMATION. ONLY ANSWER FROM THE PROVIDED INFORMATION.
-
 		If you do not have the information to answer the question, say so plainly and do not make up information.
+		A non-empty SQL result is authoritative evidence. Never claim information is missing if SQL rows are present. For “which patients” questions, list the patient names from the rows. When the SQL evidence is a bounded patient list, state that these are the matching patients returned by this search and offer to look up more if the user needs them. Do not claim the returned page is every matching patient unless the evidence explicitly says so.
 		`,
 		messages: [
 			{
@@ -42,6 +42,6 @@ export function aggregate(
 			`,
 			},
 		],
-		temperature: 0.7,
+		temperature: 0,
 	});
 }

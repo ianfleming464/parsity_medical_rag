@@ -18,11 +18,16 @@ import type { Message } from './agent';
  * Fields needed:
  * - isSchedulingRequest: boolean - Whether this is a scheduling request
  * - patientName: string | null - Name of the patient to schedule
- * - suggestedDate: string | null - Date in YYYY-MM-DD format
+ * - suggestedDate: string | null - Date in YYYY-MM-DD format	
  * - suggestedTime: string | null - Time in HH:MM 24h format
  * - reason: string | null - Appointment reason if mentioned
  */
 const SchedulingIntentSchema = z.object({
+	isSchedulingRequest: z
+		.boolean()
+		.describe(
+			'is this a rquest to book an appointment',
+		),
 	patientName: z
 		.string()
 		.nullable()
@@ -107,9 +112,11 @@ other fields to null.`,
  * a bookable request. The route sends this in the X-Scheduling-Action header.
  */
 export function buildSchedulingAction(intent: SchedulingIntent) {
-	if (!intent.patientName) {
-		return null;
-	}
+ 
+	if (!intent.isSchedulingRequest || !intent.patientName) {
+    return null;
+  }
+	
 	return {
 		type: 'scheduling_action' as const,
 		patientName: intent.patientName,

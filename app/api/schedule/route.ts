@@ -5,20 +5,29 @@
  */
 
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
 import { scheduleAppointment, isCalConfigured } from '@/lib/calendar';
 import { callToConfirmAppointment, isRetellConfigured } from '@/lib/retell';
+
+const ScheduleRequestSchema = z.object({
+	patientName: z.string().trim().min(1),
+	dateTime: z.string().datetime({ offset: true }),
+	timeZone: z.string().trim().min(1),
+});
 
 export async function POST(request: Request) {
 	try {
 		// The gate here is the human-in-the-loop confirmation in the UI, not a
 		// login — a scheduling card only posts after the user confirms it.
-		const body = await request.json();
-		const { patientName, dateTime, notes } = body;
+		const { patientName, dateTime, timeZone } = ScheduleRequestSchema.parse(
+			await request.json(),
+		);
 
 		if (!isCalConfigured()) {
 			return NextResponse.json(
 				{
-					error: 'Calendar integration not configured. Set CAL_API_KEY and CAL_EVENT_TYPE_ID.',
+					error:
+						'Calendar integration not configured. Set CAL_API_KEY, CAL_EVENT_TYPE_ID, and CAL_ATTENDEE_EMAIL.',
 				},
 				{ status: 503 },
 			);
@@ -27,7 +36,7 @@ export async function POST(request: Request) {
 		const result = await scheduleAppointment({
 			patientName,
 			dateTime,
-			notes,
+			timeZone,
 		});
 
 		if (!result.success) {
@@ -58,6 +67,9 @@ export async function POST(request: Request) {
 			confirmationCall,
 		});
 	} catch (error) {
+		if (error instanceof z.ZodError) {
+			return NextResponse.json({ error: error.message }, { status: 400 });
+		}
 		console.error('Schedule error:', error);
 		return NextResponse.json(
 			{

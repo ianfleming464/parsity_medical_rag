@@ -12,6 +12,36 @@ const SqlSchema = z.object({
   sql: z.string().describe('One read-only Postgres SELECT. No semicolons. No LIMIT. NO DELETE'),
 });
 
+function formatSqlValue(value: unknown): string {
+  if (value instanceof Date) return value.toISOString();
+  if (value !== null && typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+export function formatSqlResult(
+  query: string,
+  sql: string,
+  rows: Record<string, unknown>[],
+): string {
+  if (rows.length === 0) {
+    return `SQL result for the user question "${query}": 0 rows — nothing matches.`;
+  }
+
+  return [
+    `SQL matches for the user question: "${query}"`,
+    'The rows below were returned by this executed filter:',
+    sql,
+    `Rows returned: ${rows.length} total (first ${Math.min(rows.length, 20)} shown).`,
+    ...rows.slice(0, 20).map(
+      row =>
+        '- ' +
+        Object.entries(row)
+          .map(([key, value]) => `${key}: ${formatSqlValue(value)}`)
+          .join(', '),
+    ),
+  ].join('\n');
+}
+
 const SCHEMA = `You write PostgreSQL for a medical-records database.
 Columns are camelCase and MUST be double-quoted: p."firstName". Tables are lowercase.
 patients(id, "firstName", "lastName", gender, "birthDate", "deathDate", city, state)
@@ -21,6 +51,34 @@ observations(id, "patientId", display, "valueNumber", unit, "effectiveDate")
 notes(id, "patientId", date, content)
 Every table joins to patients via "patientId" -> patients.id.
 Rules: SELECT only. Use ILIKE '%term%' on display. Always add a LIMIT.
+For patient-list questions, order names by last name then first name and use
+LIMIT 10 by default. If the user explicitly asks for more or specifies a
+number, use that requested count up to a maximum LIMIT of 100.
+When the user explicitly asks about “one of the patients”, “any patient”, or
+a random patient, choose a real patient with ORDER BY RANDOM() LIMIT 1. Never
+invent a patient ID or use a placeholder such as 'specific_patient_id'. For a
+random health-history summary, choose the patient BEFORE retrieving related
+records. Use this one-row CTE pattern, adapting field names only as needed:
+
+WITH selected_patient AS (
+  SELECT id, "firstName", "lastName", gender, "birthDate", "deathDate", city, state
+  FROM patients
+  ORDER BY RANDOM()
+  LIMIT 1
+)
+SELECT
+  p.*,
+  (SELECT array_agg(DISTINCT display) FROM conditions WHERE "patientId" = p.id) AS conditions,
+  (SELECT array_agg(DISTINCT display) FROM medications WHERE "patientId" = p.id) AS medications,
+  (SELECT array_agg(DISTINCT display) FROM observations WHERE "patientId" = p.id) AS observations,
+  (SELECT string_agg(content, E'\\n---\\n' ORDER BY date DESC)
+   FROM (SELECT content, date FROM notes WHERE "patientId" = p.id ORDER BY date DESC LIMIT 5) recent_notes) AS recent_notes
+FROM selected_patient p
+LIMIT 1
+
+Do not join conditions, medications, observations, and notes together before
+random selection: that creates a huge cross-product and may time out. Do not
+add a semicolon.
 
 generator client {
   provider = "prisma-client-js"
@@ -200,19 +258,5 @@ export async function runSql(query: string, history: Message[] = []): Promise<st
   console.log(`[sql agent] ${sql}`);
 
   const rows = await prisma.$queryRawUnsafe<Record<string, unknown>[]>(sql);
-  if (rows.length === 0) return 'SQL result: 0 rows — nothing matches.';
-
-  return (
-    `SQL result (${rows.length} rows):\n` +
-    rows
-      .slice(0, 20)
-      .map(
-        r =>
-          '- ' +
-          Object.entries(r)
-            .map(([k, v]) => `${k}: ${v}`)
-            .join(', '),
-      )
-      .join('\n')
-  );
+  return formatSqlResult(query, sql, rows);
 }

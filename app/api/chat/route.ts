@@ -33,36 +33,38 @@ const ChatRequestSchema = z.object({
  * provided — it's the only piece that streams.
  */
 export async function POST(request: Request) {
-	try {
-		const { query, messages } = ChatRequestSchema.parse(
-			await request.json(),
-		);
+  try {
+    const { query, messages } = ChatRequestSchema.parse(await request.json());
 
-		const plan = await select(query, messages); // selector agent
-		let sqlResult = '';
-		let ragResult = '';
+    const plan = await select(query, messages); // selector agent
 
-		if (plan.useSql) {
-			sqlResult = await runSql(query, messages);
+    if (plan.clarificationQuery) {
+      return new Response(plan.clarificationQuery, {
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      });
+    }
+
+    let sqlResult = '';
+    let ragResult = '';
+
+    if (plan.useSql) {
+      sqlResult = await runSql(query, messages);
+    }
+
+    if (plan.useRag) {
+      ragResult = await runRag(plan.semanticQuery);
 		}
 
-		if (plan.useRag) {
-			ragResult = await runRag(plan.semanticQuery);
-		}
+    // if scheduling then short circuit
+    if (plan.useScheduler) {
+      const schedulingResult = await detectSchedulingIntent(query, messages);
 
-		// if scheduleing then short circuit
-		if (plan.useScheduler) {
-			const schedulingResult = await detectSchedulingIntent(
-				query,
-				messages,
-			);
-
-			return streamText({
-				model: openaiProvider('gpt-4o-mini'),
-				messages: [
-					{
-						role: 'user',
-						content: `
+      return streamText({
+        model: openaiProvider('gpt-4o-mini'),
+        messages: [
+          {
+            role: 'user',
+            content: `
             You are providing a calendar compoent with the patient to schedule for a visit
             The patient name is ${schedulingResult?.patientName}
             The suggested date is ${schedulingResult?.suggestedDate}
@@ -71,37 +73,28 @@ export async function POST(request: Request) {
 
             The front end that is consuming this will compose the caledar with that info.
             `,
-					},
-				],
-				temperature: 0.7,
-			}).toTextStreamResponse({
-				headers: {
-					'X-Scheduling-Action': encodeURIComponent(
-						JSON.stringify(buildSchedulingAction(schedulingResult)),
-					),
-				},
-			});
-		}
+          },
+        ],
+        temperature: 0.7,
+      }).toTextStreamResponse({
+        headers: {
+          'X-Scheduling-Action': encodeURIComponent(JSON.stringify(buildSchedulingAction(schedulingResult))),
+        },
+      });
+    }
 
-		// summarize and stream that result to the frontend
-		return aggregate(
-			query,
-			messages,
-			`${sqlResult}\n\n${ragResult}`,
-		).toTextStreamResponse();
-	} catch (error) {
-		if (error instanceof z.ZodError) {
-			return NextResponse.json({ error: error.message }, { status: 400 });
-		}
-		console.error('Chat error:', error);
-		return NextResponse.json(
-			{
-				error:
-					error instanceof Error
-						? error.message
-						: 'Internal server error',
-			},
-			{ status: 500 },
-		);
-	}
+    // summarize and stream that result to the frontend
+    return aggregate(query, messages, `${sqlResult}\n\n${ragResult}`).toTextStreamResponse();
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    console.error('Chat error:', error);
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : 'Internal server error',
+      },
+      { status: 500 },
+    );
+  }
 }

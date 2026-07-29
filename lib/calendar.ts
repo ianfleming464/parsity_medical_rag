@@ -12,13 +12,13 @@
  * 5. Add to .env: CAL_API_KEY and CAL_EVENT_TYPE_ID
  */
 
-const CAL_API_BASE = 'https://api.cal.com/v1';
+const CAL_API_BASE = 'https://api.cal.com/v2';
+const CAL_API_VERSION = '2024-08-13';
 
 export interface ScheduleRequest {
   patientName: string;
   dateTime: string; // ISO 8601 format
-  patientEmail?: string;
-  notes?: string | null;
+  timeZone: string;
 }
 
 export interface ScheduleResult {
@@ -32,42 +32,94 @@ export interface ScheduleResult {
  * Check if Cal.com is configured
  */
 export function isCalConfigured(): boolean {
-  return Boolean(process.env.CAL_API_KEY && process.env.CAL_EVENT_TYPE_ID);
+  return Boolean(
+    process.env.CAL_API_KEY &&
+      process.env.CAL_EVENT_TYPE_ID &&
+      process.env.CAL_ATTENDEE_EMAIL,
+  );
 }
 
 /**
  * Schedule an appointment via Cal.com API
  *
- * TODO: Implement this function
- * 1. Check if Cal.com is configured
- * 2. Make POST request to Cal.com bookings API
- *    - Endpoint: ${CAL_API_BASE}/bookings?apiKey=${apiKey}
- *    - Body: { eventTypeId, start, responses: { name, email }, metadata }
- * 3. Handle response and errors appropriately
- * 4. Return ScheduleResult with booking details
- *
- * Cal.com API docs: https://cal.com/docs/api-reference/v1/bookings
+ * The app keeps Cal.com credentials on the server. The attendee email is a
+ * developer-owned test inbox because the synthetic Patient schema has no email.
  */
 export async function scheduleAppointment(
   request: ScheduleRequest
 ): Promise<ScheduleResult> {
-  // TODO: Implement Cal.com booking API call
-
   if (!isCalConfigured()) {
     return {
       success: false,
-      error: 'Cal.com is not configured. Set CAL_API_KEY and CAL_EVENT_TYPE_ID.',
+      error:
+        'Cal.com is not configured. Set CAL_API_KEY, CAL_EVENT_TYPE_ID, and CAL_ATTENDEE_EMAIL.',
     };
   }
 
-  // TODO: Make the API call to Cal.com
-  // const apiKey = process.env.CAL_API_KEY;
-  // const eventTypeId = parseInt(process.env.CAL_EVENT_TYPE_ID || '0', 10);
+  const eventTypeId = Number.parseInt(process.env.CAL_EVENT_TYPE_ID!, 10);
+  if (!Number.isInteger(eventTypeId) || eventTypeId <= 0) {
+    return {
+      success: false,
+      error: 'CAL_EVENT_TYPE_ID must be a positive numeric event type ID.',
+    };
+  }
 
-  return {
-    success: false,
-    error: 'Not implemented - your turn!',
-  };
+  try {
+    const response = await fetch(`${CAL_API_BASE}/bookings`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.CAL_API_KEY}`,
+        'Content-Type': 'application/json',
+        'cal-api-version': CAL_API_VERSION,
+      },
+      body: JSON.stringify({
+        start: request.dateTime,
+        attendee: {
+          name: request.patientName,
+          email: process.env.CAL_ATTENDEE_EMAIL,
+          timeZone: request.timeZone,
+        },
+        eventTypeId,
+        metadata: { source: 'medical-rag-demo' },
+      }),
+    });
+
+    const payload: unknown = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      const message =
+        payload && typeof payload === 'object' && 'message' in payload
+          ? String(payload.message)
+          : `Cal.com booking failed (${response.status}).`;
+      return { success: false, error: message };
+    }
+
+    const data =
+      payload && typeof payload === 'object' && 'data' in payload
+        ? payload.data
+        : null;
+    const booking = data && typeof data === 'object' ? data : null;
+
+    return {
+      success: true,
+      bookingId:
+        booking && 'uid' in booking
+          ? String(booking.uid)
+          : booking && 'id' in booking
+            ? String(booking.id)
+            : undefined,
+      bookingUrl:
+        booking && 'bookingUrl' in booking ? String(booking.bookingUrl) : undefined,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? `Could not reach Cal.com: ${error.message}`
+          : 'Could not reach Cal.com.',
+    };
+  }
 }
 
 /**
