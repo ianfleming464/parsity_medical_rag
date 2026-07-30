@@ -6,6 +6,7 @@ import ReactMarkdown from 'react-markdown';
 interface Message {
   role: 'user' | 'assistant';
   content: string;
+  ragPatientIds?: string[];
 }
 
 interface SchedulingAction {
@@ -77,10 +78,17 @@ export default function Home() {
         body: JSON.stringify({
           query: userMessage,
           messages: messages,
+				previousRagPatientIds: [
+					...new Set(messages.flatMap(message => message.ragPatientIds ?? [])),
+				],
         }),
       });
 
       if (!response.ok) throw new Error('Failed to get response');
+			const ragPatientIdsHeader = response.headers.get('X-Retrieved-Patient-Ids');
+			const ragPatientIds = ragPatientIdsHeader
+				? (JSON.parse(decodeURIComponent(ragPatientIdsHeader)) as string[])
+				: [];
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
@@ -101,8 +109,9 @@ export default function Home() {
         setMessages(prev => {
           const newMessages = [...prev];
           newMessages[newMessages.length - 1] = {
-            role: 'assistant',
-            content: text,
+          role: 'assistant',
+          content: text,
+					ragPatientIds,
           };
           return newMessages;
         });

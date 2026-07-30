@@ -22,6 +22,7 @@ const planAgentSchema = z.object({
   useSql: z.boolean().describe('Whether to use the sql database which has structured data about patients'),
   useRag: z.boolean().describe('Whether to use the vector store which has infomration about patient notes BUT not structured data'),
   useScheduler: z.boolean().describe('Decide whether to schedule an appointment for the patient'),
+	 excludePreviousPatients: z.boolean().describe('True only when the user explicitly asks for a different, another, or someone else patient than patients already shown in this conversation'),
   reason: z.string().describe('The reason for the decision to use the sql database or the vector store or NONE or to schedule an appointment'),
   agentQuery: z.string().describe('The optimized query to be sent to RAG agent - fix spelling and grammar errors').nullable(), // if useRag is true, this is the query to be sent to the RAG agent
   clarificationQuery: z
@@ -34,6 +35,7 @@ export type Plan = {
   useSql: boolean;
   useRag: boolean;
   useScheduler: boolean;
+	 excludePreviousPatients: boolean;
   clarificationQuery: string | null;
   /** false = a general question with no tie to the records — answer directly. */
   needsSearch: boolean;
@@ -71,7 +73,7 @@ const SELECTOR_SYSTEM_PROMPT = `
   3. Both SQL and RAG
   Use both when a question needs structured facts and clinical-note narrative.
   Example: “Summarize Abe Frami’s health history” needs SQL for conditions,
-  medications, labs, and dates, plus RAG for clinical-note context.
+  medications, labs, and dates, plus RAG for clinical-note context. Further example: "Which diabetic patients have notes describing foot pain?" needs SQL to find the diabetic patients, and RAG to find the foot-pain notes - you must use both.
 
   4. Scheduler
   Use the scheduler only when the user clearly asks to schedule, book, arrange,
@@ -87,6 +89,10 @@ const SELECTOR_SYSTEM_PROMPT = `
     choose SQL or RAG. Set both to false and provide a clarification question.
     This rule does not apply when the user explicitly authorizes a random
     patient with wording such as “one of the patients”.
+  - Set excludePreviousPatients to true only when the user explicitly asks for
+    a different patient, another patient, someone else, or excludes a named
+    patient from the conversation. Do not set it merely because this is a
+    follow-up or asks about a new symptom; the same patient may be relevant.
   - For general medical questions unrelated to this clinic’s patient records,
     set useSql and useRag to false. Do not redirect or invent records.
   - Use agentQuery only when useRag is true. It must be a short, natural-language
@@ -130,7 +136,7 @@ export async function select(query: string, history: Message[] = []): Promise<Pl
 				\n\n User Query: ${query}`,
       }, // the query from the user
     ],
-    temperature: 0.5,
+    temperature: 0,
   });
 
   console.log(answer.output_parsed);
@@ -141,6 +147,7 @@ export async function select(query: string, history: Message[] = []): Promise<Pl
     useSql: p.useSql,
     useRag: p.useRag,
     useScheduler: p.useScheduler,
+		excludePreviousPatients: p.excludePreviousPatients,
     clarificationQuery: p.clarificationQuery,
     needsSearch: p.useSql || p.useRag,
     semanticQuery: p.agentQuery ?? query,

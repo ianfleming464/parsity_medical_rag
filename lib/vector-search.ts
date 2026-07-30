@@ -11,6 +11,7 @@
 import { Pinecone, RerankResult } from '@pinecone-database/pinecone';
 import { createEmbedding } from './openai';
 import type { VectorSearchResult } from './types';
+import { buildPatientMetadataFilter } from './patient-filter';
 
 const pinecone = new Pinecone({
 	apiKey: process.env.PINECONE_API_KEY!,
@@ -22,6 +23,7 @@ const RERANK_MODEL = 'bge-reranker-v2-m3';
 export interface VectorSearchOptions {
 	topK?: number;
 	patientIds?: string[]; // Filter to specific patients (for hybrid queries)
+	excludePatientIds?: string[]; // Exclude previously shown patients on an explicit diversity request
 	dateFrom?: string;
 	dateTo?: string;
 }
@@ -36,14 +38,8 @@ export async function searchClinicalNotes(
 	docs: any[];
 	rerankedDocuments: any[];
 }> {
-	const { topK = 100, patientIds } = options;
-
-	const filter =
-		patientIds && patientIds.length > 0
-			? patientIds.length === 1
-				? { patientId: patientIds[0] }
-				: { patientId: { $in: patientIds } }
-			: undefined;
+	const { topK = 100, patientIds, excludePatientIds } = options;
+	const filter = buildPatientMetadataFilter(patientIds, excludePatientIds);
 
 	// turn the query into an embedding
 

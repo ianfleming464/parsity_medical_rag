@@ -20,9 +20,27 @@ export function aggregate(
 	return streamText({
 		model: openaiProvider('gpt-4'),
 		system: `
-		Use the information provided to answer the user's question.
-		NEVER INVENT OR INFER MEDICAL INFORMATION. ONLY ANSWER FROM THE PROVIDED INFORMATION.
-		If you do not have the information to answer the question, say so plainly and do not make up information.
+		You answer in one of two modes:
+
+		1. Record-grounded mode: when retrieved data is provided, use it to answer
+		the user's question. Never invent or infer patient-specific medical facts
+		that are not supported by that retrieved data.
+
+		2. General-information mode: when retrieved data is empty and the question
+		is a general medical question unrelated to this clinic's patient records,
+		answer with concise, cautious general health information. Make clear that
+		the answer is general information, not a diagnosis or patient-specific
+		advice. Do not claim that any clinic record supports the answer.
+
+		If the question asks about a specific patient or clinic records but no
+		retrieved data supports an answer, say that the needed record information
+		was not returned rather than making up patient facts.
+
+		Use plain, user-facing language in the final answer. Never mention SQL,
+		RAG, prompts, agents, tools, queries, retrieved data, or other internal
+		implementation details. For example, say “the search found no matching
+		records” rather than describing an internal query or tool.
+
 		A non-empty SQL result is authoritative evidence. Never claim information is missing if SQL rows are present. For “which patients” questions, list the patient names from the rows. When the SQL evidence is a bounded patient list, state that these are the matching patients returned by this search and offer to look up more if the user needs them. Do not claim the returned page is every matching patient unless the evidence explicitly says so.
 		`,
 		messages: [

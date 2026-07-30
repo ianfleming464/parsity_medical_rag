@@ -19,6 +19,7 @@ const ChatRequestSchema = z.object({
       }),
     )
     .default([]),
+	previousRagPatientIds: z.array(z.string()).default([]),
 });
 
 /**
@@ -34,7 +35,7 @@ const ChatRequestSchema = z.object({
  */
 export async function POST(request: Request) {
   try {
-    const { query, messages } = ChatRequestSchema.parse(await request.json());
+    const { query, messages, previousRagPatientIds } = ChatRequestSchema.parse(await request.json());
 
     const plan = await select(query, messages); // selector agent
 
@@ -46,13 +47,18 @@ export async function POST(request: Request) {
 
     let sqlResult = '';
     let ragResult = '';
+		let ragPatientIds: string[] = [];
 
     if (plan.useSql) {
       sqlResult = await runSql(query, messages);
     }
 
     if (plan.useRag) {
-      ragResult = await runRag(plan.semanticQuery);
+			const rag = await runRag(plan.semanticQuery, {
+				excludePatientIds: plan.excludePreviousPatients ? previousRagPatientIds : undefined,
+			});
+			ragResult = rag.context;
+			ragPatientIds = rag.patientIds;
 		}
 
     // if scheduling then short circuit
@@ -84,7 +90,11 @@ export async function POST(request: Request) {
     }
 
     // summarize and stream that result to the frontend
-    return aggregate(query, messages, `${sqlResult}\n\n${ragResult}`).toTextStreamResponse();
+    return aggregate(query, messages, `${sqlResult}\n\n${ragResult}`).toTextStreamResponse({
+			headers: plan.useRag
+			? { 'X-Retrieved-Patient-Ids': encodeURIComponent(JSON.stringify(ragPatientIds)) }
+			: undefined,
+		});
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
