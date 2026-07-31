@@ -54,6 +54,14 @@ const SchedulingIntentSchema = z.object({
 
 export type SchedulingIntent = z.infer<typeof SchedulingIntentSchema>;
 
+export type SchedulingAction = {
+	type: 'scheduling_action';
+	patientName: string;
+	suggestedDate: string;
+	suggestedTime: string;
+	reason: string | null;
+};
+
 /**
  * Analyze a query for scheduling intent
  *
@@ -111,7 +119,9 @@ other fields to null.`,
  * Build the scheduling action object the UI card needs, or null if this isn't
  * a bookable request. The route sends this in the X-Scheduling-Action header.
  */
-export function buildSchedulingAction(intent: SchedulingIntent) {
+export function buildSchedulingAction(
+	intent: SchedulingIntent,
+): SchedulingAction | null {
  
 	if (!intent.isSchedulingRequest || !intent.patientName) {
     return null;
@@ -124,6 +134,14 @@ export function buildSchedulingAction(intent: SchedulingIntent) {
 		suggestedTime: intent.suggestedTime || '09:00',
 		reason: intent.reason,
 	};
+}
+
+/**
+ * User-facing scheduling text is deterministic because the confirmation card,
+ * not another model response, is the source of truth for appointment details.
+ */
+export function buildSchedulingMessage(action: SchedulingAction): string {
+	return `Ready to schedule an appointment for ${action.patientName}. Please review the proposed date and time in the confirmation card, then select Confirm Appointment to book it.`;
 }
 
 /**

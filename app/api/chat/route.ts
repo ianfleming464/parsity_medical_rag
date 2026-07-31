@@ -5,9 +5,11 @@ import { select } from '@/lib/agents/selector';
 import { runSql } from '@/lib/agents/sql';
 import { runRag } from '@/lib/agents/rag';
 import { aggregate } from '@/lib/agents/aggregator';
-import { buildSchedulingAction, detectSchedulingIntent } from '@/lib/scheduling';
-import { streamText } from 'ai';
-import { openaiProvider } from '@/lib/openai';
+import {
+  buildSchedulingAction,
+  buildSchedulingMessage,
+  detectSchedulingIntent,
+} from '@/lib/scheduling';
 
 const ChatRequestSchema = z.object({
   query: z.string().min(1),
@@ -64,27 +66,21 @@ export async function POST(request: Request) {
     // if scheduling then short circuit
     if (plan.useScheduler) {
       const schedulingResult = await detectSchedulingIntent(query, messages);
+      const schedulingAction = buildSchedulingAction(schedulingResult);
 
-      return streamText({
-        model: openaiProvider('gpt-4o-mini'),
-        messages: [
-          {
-            role: 'user',
-            content: `
-            You are providing a calendar compoent with the patient to schedule for a visit
-            The patient name is ${schedulingResult?.patientName}
-            The suggested date is ${schedulingResult?.suggestedDate}
-            The suggested time is ${schedulingResult?.suggestedTime}
-            The reason is ${schedulingResult?.reason}
+      if (!schedulingAction) {
+        return new Response(
+          'I need the patient’s name before I can prepare an appointment.',
+          { headers: { 'Content-Type': 'text/plain; charset=utf-8' } },
+        );
+      }
 
-            The front end that is consuming this will compose the caledar with that info.
-            `,
-          },
-        ],
-        temperature: 0.7,
-      }).toTextStreamResponse({
+      return new Response(buildSchedulingMessage(schedulingAction), {
         headers: {
-          'X-Scheduling-Action': encodeURIComponent(JSON.stringify(buildSchedulingAction(schedulingResult))),
+          'Content-Type': 'text/plain; charset=utf-8',
+          'X-Scheduling-Action': encodeURIComponent(
+            JSON.stringify(schedulingAction),
+          ),
         },
       });
     }
