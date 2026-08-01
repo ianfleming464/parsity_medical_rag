@@ -56,12 +56,15 @@ server.registerTool(
         topK,
         patientIds: patientId ? [patientId] : undefined,
       });
+      const rerankedNotes = results.rerankedDocuments
+        .map((reranked) => results.docs[reranked.index])
+        .filter(Boolean);
 
-      if (!results.length) {
+      if (!rerankedNotes.length) {
         return { content: [{ type: 'text', text: 'No matching clinical notes found.' }] };
       }
 
-      return { content: [{ type: 'text', text: formatVectorResults(results) }] };
+      return { content: [{ type: 'text', text: formatVectorResults(rerankedNotes) }] };
     } catch (error) {
       return {
         content: [{ type: 'text', text: `Error searching notes: ${error}` }],
@@ -70,6 +73,21 @@ server.registerTool(
     }
   }
 );
+
+
+server.registerTool(
+    'get_search_help',
+    {
+      description: 'Explain which medical-record search capabilities are available.',
+      inputSchema: {},
+    },
+    async () => ({
+      content: [{
+        type: 'text',
+        text: 'You can search clinical notes by symptom or topic. Patient-identifying details are obscured for this front-office tool.',
+      }],
+    }),
+  );
 
 // TODO — add at least one more tool, following the query_notes example above.
 // Idea (front-office appropriate, since every response must be PII-obscured):

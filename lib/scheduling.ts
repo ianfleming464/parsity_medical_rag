@@ -14,52 +14,30 @@ import type { Message } from './agent';
 /**
  * Schema for scheduling intent detection
  *
- * TODO: Define the Zod schema for scheduling intent
+ * Define the Zod schema for scheduling intent
  * Fields needed:
  * - isSchedulingRequest: boolean - Whether this is a scheduling request
  * - patientName: string | null - Name of the patient to schedule
- * - suggestedDate: string | null - Date in YYYY-MM-DD format	
+ * - suggestedDate: string | null - Date in YYYY-MM-DD format
  * - suggestedTime: string | null - Time in HH:MM 24h format
  * - reason: string | null - Appointment reason if mentioned
  */
 const SchedulingIntentSchema = z.object({
-	isSchedulingRequest: z
-		.boolean()
-		.describe(
-			'is this a rquest to book an appointment',
-		),
-	patientName: z
-		.string()
-		.nullable()
-		.describe(
-			'Name of the patient to schedule (from the message or conversation history)',
-		),
-	suggestedDate: z
-		.string()
-		.nullable()
-		.describe(
-			'Requested date in YYYY-MM-DD (resolve "tomorrow", "next Tuesday" from today)',
-		),
-	suggestedTime: z
-		.string()
-		.nullable()
-		.describe(
-			'Requested time in HH:MM 24-hour format; null if not mentioned',
-		),
-	reason: z
-		.string()
-		.nullable()
-		.describe('Reason for the appointment if mentioned'),
+  isSchedulingRequest: z.boolean().describe('is this a rquest to book an appointment'),
+  patientName: z.string().nullable().describe('Name of the patient to schedule (from the message or conversation history)'),
+  suggestedDate: z.string().nullable().describe('Requested date in YYYY-MM-DD (resolve "tomorrow", "next Tuesday" from today)'),
+  suggestedTime: z.string().nullable().describe('Requested time in HH:MM 24-hour format; null if not mentioned'),
+  reason: z.string().nullable().describe('Reason for the appointment if mentioned'),
 });
 
 export type SchedulingIntent = z.infer<typeof SchedulingIntentSchema>;
 
 export type SchedulingAction = {
-	type: 'scheduling_action';
-	patientName: string;
-	suggestedDate: string;
-	suggestedTime: string;
-	reason: string | null;
+  type: 'scheduling_action';
+  patientName: string;
+  suggestedDate: string;
+  suggestedTime: string;
+  reason: string | null;
 };
 
 /**
@@ -74,19 +52,16 @@ export type SchedulingAction = {
  *    - Default to 09:00 if no time specified
  * 3. Return parsed scheduling intent
  */
-export async function detectSchedulingIntent(
-	query: string,
-	history: Message[] = [],
-): Promise<SchedulingIntent> {
-	const todayStr = new Date().toISOString().split('T')[0];
-	const dayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+export async function detectSchedulingIntent(query: string, history: Message[] = []): Promise<SchedulingIntent> {
+  const todayStr = new Date().toISOString().split('T')[0];
+  const dayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
 
-	const response = await openai.responses.parse({
-		model: 'gpt-4o-mini',
-		input: [
-			{
-				role: 'system',
-				content: `You analyze user queries to detect appointment scheduling requests.
+  const response = await openai.responses.parse({
+    model: 'gpt-4o-mini',
+    input: [
+      {
+        role: 'system',
+        content: `You analyze user queries to detect appointment scheduling requests.
 Today is ${dayName}, ${todayStr}.
 
 If the user wants to schedule/book an appointment:
@@ -102,38 +77,35 @@ Use the conversation history to resolve references like "him", "her", or
 
 If it is not a scheduling request, set isSchedulingRequest to false and all
 other fields to null.`,
-			},
-			...history.slice(-5),
-			{ role: 'user', content: query },
-		],
-		temperature: 0,
-		text: {
-			format: zodTextFormat(SchedulingIntentSchema, 'scheduling_intent'),
-		},
-	});
+      },
+      ...history.slice(-5),
+      { role: 'user', content: query },
+    ],
+    temperature: 0,
+    text: {
+      format: zodTextFormat(SchedulingIntentSchema, 'scheduling_intent'),
+    },
+  });
 
-	return SchedulingIntentSchema.parse(response.output_parsed);
+  return SchedulingIntentSchema.parse(response.output_parsed);
 }
 
 /**
  * Build the scheduling action object the UI card needs, or null if this isn't
  * a bookable request. The route sends this in the X-Scheduling-Action header.
  */
-export function buildSchedulingAction(
-	intent: SchedulingIntent,
-): SchedulingAction | null {
- 
-	if (!intent.isSchedulingRequest || !intent.patientName) {
+export function buildSchedulingAction(intent: SchedulingIntent): SchedulingAction | null {
+  if (!intent.isSchedulingRequest || !intent.patientName) {
     return null;
   }
-	
-	return {
-		type: 'scheduling_action' as const,
-		patientName: intent.patientName,
-		suggestedDate: intent.suggestedDate || getDefaultDate(),
-		suggestedTime: intent.suggestedTime || '09:00',
-		reason: intent.reason,
-	};
+
+  return {
+    type: 'scheduling_action' as const,
+    patientName: intent.patientName,
+    suggestedDate: intent.suggestedDate || getDefaultDate(),
+    suggestedTime: intent.suggestedTime || '09:00',
+    reason: intent.reason,
+  };
 }
 
 /**
@@ -141,20 +113,20 @@ export function buildSchedulingAction(
  * not another model response, is the source of truth for appointment details.
  */
 export function buildSchedulingMessage(action: SchedulingAction): string {
-	return `Ready to schedule an appointment for ${action.patientName}. Please review the proposed date and time in the confirmation card, then select Confirm Appointment to book it.`;
+  return `Ready to schedule an appointment for ${action.patientName}. Please review the proposed date and time in the confirmation card, then select Confirm Appointment to book it.`;
 }
 
 /**
  * Get default date (next business day)
  */
 export function getDefaultDate(): string {
-	const date = new Date();
-	date.setDate(date.getDate() + 1);
+  const date = new Date();
+  date.setDate(date.getDate() + 1);
 
-	// Skip weekends
-	while (date.getDay() === 0 || date.getDay() === 6) {
-		date.setDate(date.getDate() + 1);
-	}
+  // Skip weekends
+  while (date.getDay() === 0 || date.getDay() === 6) {
+    date.setDate(date.getDate() + 1);
+  }
 
-	return date.toISOString().split('T')[0];
+  return date.toISOString().split('T')[0];
 }
